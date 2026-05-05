@@ -1,0 +1,76 @@
+version: "3.9"
+
+services:
+
+  # ─── PostgreSQL ─────────────────────────────────────────────────────────────
+  db:
+    image: postgres:15-alpine
+    container_name: journeymind-db
+    environment:
+      POSTGRES_USER: postgres
+      POSTGRES_PASSWORD: password
+      POSTGRES_DB: journeymind
+    ports:
+      - "5432:5432"
+    volumes:
+      - postgres_data:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U postgres"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+
+  # ─── FastAPI Backend ─────────────────────────────────────────────────────────
+  api:
+    build:
+      context: ./backend
+      dockerfile: Dockerfile
+    container_name: journeymind-api
+    ports:
+      - "8000:8000"
+    environment:
+      - OPENAI_API_KEY=${OPENAI_API_KEY}
+      - DATABASE_URL=postgresql+asyncpg://postgres:password@db:5432/journeymind
+      - FAISS_INDEX_PATH=faiss_index/
+      - WEATHER_API_KEY=${WEATHER_API_KEY:-}
+      - CURRENCY_API_KEY=${CURRENCY_API_KEY:-}
+      - ENVIRONMENT=development
+      - MAX_TRIP_DAYS=30
+      - DEFAULT_CONTINGENCY_PCT=0.10
+    volumes:
+      - faiss_index:/app/faiss_index   # persistent FAISS index
+      - ./backend/data:/app/data       # travel reviews CSV
+    depends_on:
+      db:
+        condition: service_healthy
+    restart: unless-stopped
+
+  # ─── React Frontend ──────────────────────────────────────────────────────────
+  frontend:
+    build:
+      context: ./frontend
+      dockerfile: Dockerfile
+    container_name: journeymind-frontend
+    ports:
+      - "5173:80"
+    depends_on:
+      - api
+    restart: unless-stopped
+
+  # ─── PgAdmin (optional — DB GUI) ─────────────────────────────────────────────
+  pgadmin:
+    image: dpage/pgadmin4:latest
+    container_name: journeymind-pgadmin
+    environment:
+      PGADMIN_DEFAULT_EMAIL: admin@journeymind.com
+      PGADMIN_DEFAULT_PASSWORD: admin
+    ports:
+      - "5050:80"
+    depends_on:
+      - db
+    profiles:
+      - tools   # only starts with: docker-compose --profile tools up
+
+volumes:
+  postgres_data:
+  faiss_index:
