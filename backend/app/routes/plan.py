@@ -59,6 +59,7 @@ def parse_budget_breakdown(budget_text: str, total_budget: float) -> dict:
     Parse BudgetAnalyst output text into structured breakdown.
     Ensures categories sum exactly to total_budget.
     """
+    # ─── Normalize & balance ──────────────────────────────────────────────
     categories = [
         "accommodation_inr",
         "food_inr",
@@ -68,43 +69,27 @@ def parse_budget_breakdown(budget_text: str, total_budget: float) -> dict:
         "contingency_inr",
     ]
 
-    extracted = {}
-    for category in categories:
-        # Match patterns like "accommodation_inr: 28000" or "Accommodation: ₹28,000"
-        patterns = [
-            rf"{category}[:\s]+[\₹]?([\d,]+)",
-            rf"{category.replace('_inr', '')}[:\s]+[\₹]?([\d,]+)",
-        ]
-        for pattern in patterns:
-            match = re.search(pattern, budget_text, re.IGNORECASE)
-            if match:
-                value = float(match.group(1).replace(",", ""))
-                extracted[category] = value
-                break
-
-    # If parsing failed or incomplete — distribute proportionally
-    if len(extracted) < 6:
-        logger.warning("Budget parsing incomplete — using proportional fallback")
-        contingency_pct = settings.default_contingency_pct
-        subtotal = total_budget / (1 + contingency_pct)
-        contingency = total_budget - subtotal
-
-        extracted = {
-            "accommodation_inr": round(subtotal * 0.38, 2),
-            "food_inr":          round(subtotal * 0.22, 2),
-            "transport_inr":     round(subtotal * 0.22, 2),
-            "activities_inr":    round(subtotal * 0.10, 2),
-            "shopping_buffer_inr": round(subtotal * 0.08, 2),
-            "contingency_inr":   round(contingency, 2),
-        }
-
+    # Cap contingency to 15% max
     max_contingency = round(total_budget * 0.15, 2)
     if extracted.get("contingency_inr", 0) > max_contingency:
-        excess = round(extracted["contingency_inr"] - max_contingency, 2)
         extracted["contingency_inr"] = max_contingency
-        extracted["shopping_buffer_inr"] = round(extracted.get("shopping_buffer_inr", 0) + excess, 2)
-    extracted["total_inr"] = total_budget
 
+    # Recalculate sum of non-contingency categories
+    non_contingency_sum = sum(
+        extracted.get(c, 0) for c in categories if c != "contingency_inr"
+    )
+
+    # Force total to match: adjust contingency to fill the gap
+    extracted["contingency_inr"] = round(total_budget - non_contingency_sum, 2)
+
+    # Final safety: if still off (rounding), absorb in shopping_buffer
+    final_sum = sum(extracted.get(c, 0) for c in categories)
+    if abs(final_sum - total_budget) > 0.01:
+        extracted["shopping_buffer_inr"] = round(
+            extracted.get("shopping_buffer_inr", 0) + (total_budget - final_sum), 2
+        )
+
+    extracted["total_inr"] = total_budget
     logger.info(f"Budget breakdown parsed — total: ₹{extracted['total_inr']:,.0f}")
     return extracted
 
