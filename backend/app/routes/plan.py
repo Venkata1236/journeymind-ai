@@ -118,6 +118,7 @@ def parse_budget_breakdown(budget_text: str, total_budget: float) -> dict:
     return extracted
 
 
+
 def parse_weather_info(research_text: str, destinations: list[str]) -> dict:
     """Parse weather info from WeatherTool outputs embedded in research text."""
     weather = {}
