@@ -66,7 +66,7 @@ def run_crew(
 ) -> dict:
     """
     Run the crew and return raw outputs per task.
-    Returns dict with output from each agent for parsing in the route.
+    CrewAI 1.14.4: result.tasks_output is the list of TaskOutput objects.
     """
     crew = assemble_crew(
         origin=origin,
@@ -83,12 +83,18 @@ def run_crew(
     logger.info("Starting JourneyMind crew execution...")
     result = crew.kickoff()
 
-    # Extract per-task outputs for structured parsing
+    # CrewAI 1.14.4 — result.tasks_output is list[TaskOutput]
+    task_names = ["research", "itinerary", "budget", "local_tips"]
     task_outputs = {}
-    for i, task_output in enumerate(crew.tasks):
-        task_name = ["research", "itinerary", "budget", "local_tips"][i]
-        task_outputs[task_name] = task_output.output.raw if task_output.output else ""
-        logger.info(f"Task '{task_name}' output length: {len(task_outputs[task_name])} chars")
+
+    for i, task_name in enumerate(task_names):
+        if i < len(result.tasks_output):
+            raw = result.tasks_output[i].raw or ""
+        else:
+            raw = ""
+        task_outputs[task_name] = raw
+        logger.info(f"Task '{task_name}' output: {len(raw)} chars")
+        logger.debug(f"Task '{task_name}' preview: {raw[:200]}")
 
     logger.success("JourneyMind crew execution complete")
 
