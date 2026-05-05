@@ -81,7 +81,7 @@ def parse_budget_breakdown(budget_text: str, total_budget: float) -> dict:
                 extracted[category] = float(match.group(1).replace(",", ""))
                 break
 
-    # ── Step 2: Proportional fallback if parsing incomplete ───────────
+    # ── Step 2: Proportional fallback if parsing incomplete ──────────
     if len(extracted) < 6:
         logger.warning("Budget parsing incomplete — using proportional fallback")
         contingency_pct = settings.default_contingency_pct
@@ -95,18 +95,26 @@ def parse_budget_breakdown(budget_text: str, total_budget: float) -> dict:
             "contingency_inr":     round(total_budget - subtotal, 2),
         }
 
-    # ── Step 3: Cap contingency to 15% max ────────────────────────────
-    max_contingency = round(total_budget * 0.15, 2)
-    if extracted.get("contingency_inr", 0) > max_contingency:
-        extracted["contingency_inr"] = max_contingency
-
-    # ── Step 4: Force exact sum — set contingency to fill the gap ─────
+    # ── Step 3: Sum non-contingency categories ───────────────────────
     non_contingency_sum = sum(
         extracted.get(c, 0) for c in categories if c != "contingency_inr"
     )
-    extracted["contingency_inr"] = round(total_budget - non_contingency_sum, 2)
 
-    # ── Step 5: Absorb any rounding penny in shopping_buffer ──────────
+    # ── Step 4: Calculate raw contingency to fill the gap ────────────
+    raw_contingency = round(total_budget - non_contingency_sum, 2)
+
+    # ── Step 5: Cap contingency at 15% — redistribute excess ─────────
+    max_contingency = round(total_budget * 0.15, 2)
+    if raw_contingency > max_contingency:
+        excess = round(raw_contingency - max_contingency, 2)
+        extracted["contingency_inr"] = max_contingency
+        extracted["activities_inr"] = round(
+            extracted.get("activities_inr", 0) + excess, 2
+        )
+    else:
+        extracted["contingency_inr"] = raw_contingency
+
+    # ── Step 6: Final rounding safety — absorb penny in shopping ─────
     final_sum = sum(extracted.get(c, 0) for c in categories)
     if abs(final_sum - total_budget) > 0.01:
         extracted["shopping_buffer_inr"] = round(
