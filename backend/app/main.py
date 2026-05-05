@@ -26,14 +26,17 @@ async def lifespan(app: FastAPI):
     await create_tables()
     logger.info("Database tables ready")
 
-    # Warm up FAISS index into memory
-    faiss_ready = is_index_loaded()
-    if faiss_ready:
-        logger.success("FAISS index loaded and ready")
-    else:
-        logger.warning(
-            "FAISS index not found. Run: cd backend && python -m app.rag.embedder"
-        )
+        # Warm up FAISS index into memory
+    try:
+        faiss_ready = is_index_loaded()
+        if faiss_ready:
+            logger.success("FAISS index loaded and ready")
+        else:
+            logger.warning(
+                "FAISS index not found. Run: cd backend && python -m app.rag.embedder"
+            )
+    except Exception as e:
+        logger.warning(f"FAISS index not ready: {e}. Run embedder first.")
 
     logger.success("JourneyMind API startup complete")
     yield
