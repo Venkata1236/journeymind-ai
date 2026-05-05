@@ -197,3 +197,64 @@ All recommendations must be specific — no generic travel advice.
         agent=agent,
         context=context_tasks,
     )
+    
+def create_tasks(
+    origin: str,
+    destinations: list,
+    duration_days: int,
+    budget_inr: float,
+    group_size: int,
+    travel_style: str,
+    interests: list,
+    accommodation_preference: str,
+    trip_start_date: str,
+):
+    """
+    Assemble all 4 tasks with agents and context passing.
+    Returns (task_research, task_itinerary, task_budget, task_local)
+    """
+    from app.agents.agents import (
+        get_destination_researcher,
+        get_itinerary_planner,
+        get_budget_analyst,
+        get_local_expert,
+    )
+
+    researcher  = get_destination_researcher()
+    planner     = get_itinerary_planner()
+    analyst     = get_budget_analyst()
+    expert      = get_local_expert()
+
+    task_research = get_destination_research_task(
+        agent=researcher,
+        destinations=destinations,
+        travel_style=travel_style,
+        interests=interests,
+    )
+
+    task_itinerary = get_itinerary_task(
+        agent=planner,
+        destinations=destinations,
+        duration_days=duration_days,
+        travel_style=travel_style,
+        trip_start_date=trip_start_date,
+        context_tasks=[task_research],        # ← Task 2 receives Task 1 output
+    )
+
+    task_budget = get_budget_task(
+        agent=analyst,
+        budget_inr=budget_inr,
+        group_size=group_size,
+        duration_days=duration_days,
+        travel_style=travel_style,
+        context_tasks=[task_research, task_itinerary],  # ← Task 3 receives Tasks 1+2
+    )
+
+    task_local = get_local_expert_task(
+        agent=expert,
+        destinations=destinations,
+        interests=interests,
+        context_tasks=[task_research, task_itinerary, task_budget],  # ← Task 4 gets all
+    )
+
+    return task_research, task_itinerary, task_budget, task_local
