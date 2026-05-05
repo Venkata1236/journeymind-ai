@@ -2,13 +2,33 @@ import pandas as pd
 from pathlib import Path
 from loguru import logger
 
-
 DATA_PATH = Path(__file__).parent.parent.parent / "data" / "travel_reviews.csv"
+
+# UCI Travel Reviews — 10 category mapping
+CATEGORY_MAP = {
+    "Category 1":  "Art Galleries",
+    "Category 2":  "Dance Clubs",
+    "Category 3":  "Juice Bars",
+    "Category 4":  "Restaurants",
+    "Category 5":  "Museums",
+    "Category 6":  "Resorts",
+    "Category 7":  "Parks and Picnic Spots",
+    "Category 8":  "Beaches",
+    "Category 9":  "Theaters",
+    "Category 10": "Religious Institutions",
+}
+
+# Simulated destinations — UCI dataset has no location column
+# We distribute users across Indian destinations for our RAG
+DESTINATION_CYCLE = [
+    "Jaipur", "Jodhpur", "Udaipur", "Jaisalmer",
+    "Kerala", "Goa", "Mumbai", "Delhi", "Manali", "Agra",
+]
 
 
 def load_travel_reviews() -> list[dict]:
     """
-    Load and preprocess travel reviews CSV.
+    Load and preprocess UCI travel reviews CSV.
     Returns list of dicts with combined_text ready for embedding.
     """
     if not DATA_PATH.exists():
@@ -21,52 +41,61 @@ def load_travel_reviews() -> list[dict]:
     logger.info(f"Raw dataset shape: {df.shape}")
     logger.info(f"Columns: {df.columns.tolist()}")
 
-    # Drop rows with missing critical fields
-    df = df.dropna(subset=["User Location", "Category"])
-    df = df.fillna("")
-
-    logger.info(f"After cleaning: {df.shape[0]} rows")
+    df = df.fillna(0)
+    logger.info(f"Processing {len(df)} user review rows...")
 
     documents = []
-    for _, row in df.iterrows():
-        # Build combined text per review for embedding
-        combined_text = _build_combined_text(row)
+    for idx, row in df.iterrows():
+        # Assign destination cyclically — spreads reviews across Indian cities
+        destination = DESTINATION_CYCLE[idx % len(DESTINATION_CYCLE)]
+
+        # Find top 3 rated categories for this user
+        category_scores = {
+            CATEGORY_MAP[col]: float(row[col])
+            for col in CATEGORY_MAP
+            if col in row.index
+        }
+        top_categories = sorted(
+            category_scores.items(), key=lambda x: x[1], reverse=True
+        )[:3]
+
+        # Overall rating — average of all categories
+        all_scores = list(category_scores.values())
+        overall_rating = round(sum(all_scores) / len(all_scores), 2) if all_scores else 0
+
+        combined_text = _build_combined_text(
+            destination=destination,
+            top_categories=top_categories,
+            category_scores=category_scores,
+            overall_rating=overall_rating,
+        )
+
         documents.append({
             "combined_text": combined_text,
-            "destination": str(row.get("User Location", "")).strip(),
-            "category": str(row.get("Category", "")).strip(),
-            "rating": str(row.get("Overall Rating", "")).strip(),
+            "destination":   destination,
+            "category":      top_categories[0][0] if top_categories else "General",
+            "rating":        str(overall_rating),
         })
 
     logger.info(f"Built {len(documents)} documents for embedding")
     return documents
 
 
-def _build_combined_text(row: pd.Series) -> str:
-    """
-    Build a rich combined text string per review row.
-    This is what gets embedded — quality here = quality retrieval.
-    """
-    destination = str(row.get("User Location", "")).strip()
-    category = str(row.get("Category", "")).strip()
-    rating = str(row.get("Overall Rating", "")).strip()
-
-    # Collect all attribute columns (they hold numeric ratings per attribute)
-    attribute_parts = []
-    skip_cols = {"User", "User ID", "User Location", "Category", "Overall Rating"}
-    for col in row.index:
-        if col not in skip_cols:
-            val = str(row[col]).strip()
-            if val and val != "nan" and val != "0":
-                attribute_parts.append(f"{col}: {val}")
-
-    attributes_str = ". ".join(attribute_parts) if attribute_parts else ""
-
-    combined = (
+def _build_combined_text(
+    destination: str,
+    top_categories: list,
+    category_scores: dict,
+    overall_rating: float,
+) -> str:
+    top_str = ", ".join(
+        f"{cat} ({score:.1f}/4)" for cat, score in top_categories
+    )
+    all_str = ". ".join(
+        f"{cat}: {score:.1f}" for cat, score in category_scores.items()
+    )
+    return (
         f"Destination: {destination}. "
-        f"Category: {category}. "
-        f"Overall Rating: {rating}/5. "
-        f"{attributes_str}"
-    ).strip()
-
-    return combined
+        f"Top experiences: {top_str}. "
+        f"Overall rating: {overall_rating}/4. "
+        f"Category ratings: {all_str}."
+    )
