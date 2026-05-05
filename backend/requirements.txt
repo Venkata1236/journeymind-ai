@@ -1,0 +1,36 @@
+# FastAPI
+fastapi
+uvicorn[standard]
+
+# Database
+sqlalchemy
+asyncpg
+psycopg2-binary
+
+# AI / Agents
+crewai
+langchain
+langchain-openai
+openai
+
+# RAG / Vector Store
+faiss-cpu
+numpy
+
+# Data
+pandas
+
+# Config
+pydantic-settings
+
+# HTTP (for tool API calls)
+requests
+httpx
+
+# Logging
+loguru
+
+# Testing
+pytest
+pytest-asyncio
+httpx
