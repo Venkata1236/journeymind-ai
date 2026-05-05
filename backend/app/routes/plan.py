@@ -108,102 +108,166 @@ def parse_budget_breakdown(budget_text: str, total_budget: float) -> dict:
 
 
 def parse_weather_info(research_text: str, destinations: list[str]) -> dict:
-    """Parse weather info from DestinationResearcher output."""
+    """Parse weather info from WeatherTool outputs embedded in research text."""
     weather = {}
+    mock = {
+        "jaipur":  {"temp": "28-38°C", "condition": "Hot and dry",   "rain_risk": "Low",  "tip": "Carry sunscreen. Visit forts before 9am."},
+        "jodhpur": {"temp": "26-36°C", "condition": "Hot and sunny", "rain_risk": "Low",  "tip": "Light cotton. Blue City best at golden hour."},
+        "udaipur": {"temp": "25-35°C", "condition": "Pleasant",      "rain_risk": "Low",  "tip": "Evenings by the lake are cooler."},
+        "kerala":  {"temp": "24-32°C", "condition": "Humid",         "rain_risk": "High", "tip": "Pack rain gear."},
+        "goa":     {"temp": "26-33°C", "condition": "Warm, breezy",  "rain_risk": "Medium","tip": "South Goa for peace, North for nightlife."},
+    }
     for dest in destinations:
-        # Look for weather section per destination
-        pattern = rf"Weather in {dest}[:\s]+([^\n.]+)"
+        key = dest.lower()
+        # Try extracting from WeatherTool output in research text
+        pattern = rf"Weather in {dest}:?\s*([^\.]+\.?[^\.]*\.?)"
         match = re.search(pattern, research_text, re.IGNORECASE)
         if match:
-            weather[dest] = {
-                "temp": "25-35°C",
-                "condition": match.group(1).strip(),
-                "rain_risk": "Low",
-                "tip": "Check local forecast before outdoor activities",
-            }
+            raw = match.group(1).strip()
+            # Parse temp
+            temp_m = re.search(r'(\d+[-–]\d+°?C)', raw)
+            temp = temp_m.group(1) if temp_m else mock.get(key, {}).get("temp", "25-35°C")
+            # Parse rain risk
+            rain_m = re.search(r'Rain risk:\s*(\w+)', raw, re.IGNORECASE)
+            rain = rain_m.group(1) if rain_m else mock.get(key, {}).get("rain_risk", "Low")
+            # Extract tip
+            tip_m = re.search(r'(?:tip|advice|note)[:\s]+([^\n\.]+)', raw, re.IGNORECASE)
+            tip = tip_m.group(1).strip() if tip_m else mock.get(key, {}).get("tip", "Check forecast before outdoor plans.")
+            weather[dest] = {"temp": temp, "condition": raw[:60], "rain_risk": rain, "tip": tip}
         else:
-            weather[dest] = {
-                "temp": "25-35°C",
-                "condition": "Pleasant travel weather",
-                "rain_risk": "Low",
-                "tip": "Pack light layers and sunscreen",
-            }
+            # Use mock data keyed by city
+            data = mock.get(key, {"temp": "25-35°C", "condition": "Warm and pleasant", "rain_risk": "Low", "tip": "Carry light layers."})
+            weather[dest] = data
+
     return weather
 
 
 def parse_local_tips(local_text: str) -> dict:
-    """Parse LocalExpert output into structured tips."""
-    def extract_list(text: str, section: str, count: int = 5) -> list[str]:
-        pattern = rf"{section}.*?(?=\n\n|\n[A-Z]|$)"
-        match = re.search(pattern, text, re.IGNORECASE | re.DOTALL)
+    """Parse LocalExpert structured output."""
+    def extract_section(text, section_header, count=10):
+        pattern = rf'{section_header}[:\s]*\n((?:\d+\..+\n?)+)'
+        match = re.search(pattern, text, re.IGNORECASE)
         if match:
-            section_text = match.group(0)
-            items = re.findall(r"\d+\.\s+(.+?)(?=\n\d+\.|\n\n|$)", section_text, re.DOTALL)
-            return [item.strip() for item in items[:count]] if items else []
+            items = re.findall(r'\d+\.\s*(.+)', match.group(1))
+            return [item.strip() for item in items[:count] if item.strip()]
         return []
 
-    food_spots = extract_list(local_text, "FOOD SPOTS", 5)
-    cultural = extract_list(local_text, "CULTURAL ETIQUETTE", 5)
-    mistakes = extract_list(local_text, "COMMON MISTAKES", 5)
-    packing = extract_list(local_text, "PACKING LIST", 10)
-    safety = extract_list(local_text, "SAFETY", 5)
+    food    = extract_section(local_text, "FOOD SPOTS", 7)
+    culture = extract_section(local_text, "CULTURAL ETIQUETTE", 6)
+    avoid   = extract_section(local_text, "AVOID THESE", 6)
+    packing = extract_section(local_text, "PACKING LIST", 12)
+    safety  = extract_section(local_text, "SAFETY TIPS", 6)
 
-    # Fallback if parsing returns empty lists
     return {
-        "food_spots":          food_spots or ["Explore local street food markets", "Ask hotel staff for authentic recommendations"],
-        "cultural_etiquette":  cultural or ["Remove shoes before entering temples", "Dress modestly at religious sites"],
-        "common_mistakes":     mistakes or ["Avoid buying from touts near monuments", "Negotiate prices before boarding auto-rickshaws"],
-        "packing_list":        packing or ["Sunscreen SPF 50+", "Light cotton clothes", "Comfortable walking shoes", "Water bottle", "Power bank"],
-        "safety_tips":         safety or ["Keep copies of ID documents", "Use registered taxis or Ola/Uber", "Emergency: 112"],
+        "food_spots":         food    or ["Laxmi Mishtan Bhandar, Jaipur — try pyaaz kachori ₹30", "Shri Mishrilal Hotel, Jodhpur — makhaniya lassi ₹60", "Natraj Dining Hall, Udaipur — dal baati churma ₹150"],
+        "cultural_etiquette": culture or ["Remove shoes at temple entrances — carry a cloth bag for them", "Dress modestly at religious sites — carry a dupatta/scarf", "Ask before photographing locals — a smile and gesture goes a long way"],
+        "common_mistakes":    avoid   or ["Don't buy gems from street touts near Hawa Mahal — all fake", "Fix auto price before boarding — insist on meter or app cab", "Don't visit Amer Fort at 11am — peak heat and peak crowd"],
+        "packing_list":       packing or ["Sunscreen SPF 50+", "Cotton kurta (covers shoulders at temples)", "Comfortable walking shoes (cobblestone streets)", "Water bottle 1L", "Power bank", "ORS sachets (heat exhaustion prevention)", "Light scarf/dupatta"],
+        "safety_tips":        safety  or ["Save 112 (emergency), 100 (police), 108 (ambulance)", "Use Ola/Uber — never unmarked cabs at night", "Carry photocopies of passport/ID, not originals"],
     }
 
-
 def parse_itinerary(itinerary_text: str, request: TripRequest) -> list[dict]:
-    """
-    Parse ItineraryPlanner output into structured day objects.
-    Falls back to a sensible skeleton if parsing fails.
-    """
+    """Parse ItineraryPlanner structured output into day objects."""
+    from datetime import timedelta
     days = []
-    from datetime import timedelta, date
-
     start = request.trip_start_date
     destinations_cycle = request.destinations
     days_per_dest = max(1, request.duration_days // len(destinations_cycle))
 
-    for day_num in range(1, request.duration_days + 1):
-        current_date = start + timedelta(days=day_num - 1)
-        dest_index = min((day_num - 1) // days_per_dest, len(destinations_cycle) - 1)
-        city = destinations_cycle[dest_index]
+    # Split into day blocks
+    day_blocks = re.split(r'DAY\s+(\d+)\s*\|', itinerary_text, flags=re.IGNORECASE)
 
-        days.append({
-            "day": day_num,
-            "date": str(current_date),
-            "city": city,
-            "theme": f"Day {day_num} — {city} Exploration",
-            "morning": {
-                "time": "8:00 AM",
-                "activity": f"Morning exploration of {city}",
-                "duration_minutes": 120,
-                "cost_inr": 300,
-                "tip": "Start early to beat the crowds",
-            },
-            "afternoon": {
-                "time": "1:00 PM",
-                "activity": f"Lunch and afternoon sightseeing in {city}",
-                "duration_minutes": 180,
-                "cost_inr": 500,
-                "tip": "Try local street food for an authentic experience",
-            },
-            "evening": {
-                "time": "6:00 PM",
-                "activity": f"Evening walk and dinner in {city}",
-                "duration_minutes": 120,
-                "cost_inr": 400,
-                "tip": "Evenings are cooler and great for photography",
-            },
-            "accommodation": f"Hotel in {city} ({request.accommodation_preference})",
-            "daily_food_budget_inr": round(request.budget_inr / (request.duration_days * 6), 2),
-        })
+    if len(day_blocks) > 1:
+        # Structured parsing — crew followed the format
+        i = 1
+        while i < len(day_blocks) - 1:
+            try:
+                day_num = int(day_blocks[i])
+                block = day_blocks[i + 1] if i + 1 < len(day_blocks) else ""
+
+                current_date = start + timedelta(days=day_num - 1)
+                dest_idx = min((day_num - 1) // days_per_dest, len(destinations_cycle) - 1)
+                city = destinations_cycle[dest_idx]
+
+                # Extract city from block header if present
+                city_match = re.search(r'\|\s*([A-Za-z]+)\s*\|', block[:100])
+                if city_match:
+                    city = city_match.group(1).strip()
+
+                # Extract theme
+                theme_match = re.search(r'\|\s*([^\n]+)\n', block[:200])
+                theme = theme_match.group(1).strip() if theme_match else f"{city} Adventure"
+
+                def extract_slot(text, time_label):
+                    pattern = rf'{time_label}.*?:\s*([^\|]+)\|\s*(\d+)\s*mins?\s*\|\s*₹?([\d,]+)\s*\|\s*Tip:\s*([^\n]+)'
+                    m = re.search(pattern, text, re.IGNORECASE)
+                    if m:
+                        return {
+                            "time": time_label.replace("MORNING", "8:00 AM")
+                                              .replace("AFTERNOON", "1:00 PM")
+                                              .replace("EVENING", "6:00 PM"),
+                            "activity": m.group(1).strip(),
+                            "duration_minutes": int(m.group(2)),
+                            "cost_inr": float(m.group(3).replace(",", "")),
+                            "tip": m.group(4).strip(),
+                        }
+                    return None
+
+                morning = extract_slot(block, "MORNING") or {
+                    "time": "8:00 AM",
+                    "activity": f"Explore {city} landmarks",
+                    "duration_minutes": 120, "cost_inr": 300,
+                    "tip": "Visit early morning to avoid crowds",
+                }
+                afternoon = extract_slot(block, "AFTERNOON") or {
+                    "time": "1:00 PM",
+                    "activity": f"Lunch + afternoon sightseeing in {city}",
+                    "duration_minutes": 180, "cost_inr": 600,
+                    "tip": "Try local street food for authentic flavours",
+                }
+                evening = extract_slot(block, "EVENING") or {
+                    "time": "6:00 PM",
+                    "activity": f"Evening walk and dinner in {city}",
+                    "duration_minutes": 120, "cost_inr": 500,
+                    "tip": "Golden hour is perfect for photography",
+                }
+
+                # Extract hotel name
+                stay_match = re.search(r'STAY:\s*([^\n]+)', block, re.IGNORECASE)
+                hotel = stay_match.group(1).strip() if stay_match else f"{request.accommodation_preference.value.title()} hotel in {city}"
+
+                # Food budget
+                food_match = re.search(r'FOOD BUDGET:\s*₹?([\d,]+)', block, re.IGNORECASE)
+                food_budget = float(food_match.group(1).replace(",", "")) if food_match else round(request.budget_inr * 0.20 / request.duration_days, 2)
+
+                days.append({
+                    "day": day_num, "date": str(current_date),
+                    "city": city, "theme": theme,
+                    "morning": morning, "afternoon": afternoon, "evening": evening,
+                    "accommodation": hotel,
+                    "daily_food_budget_inr": food_budget,
+                })
+            except Exception as e:
+                logger.warning(f"Day {i} parse error: {e}")
+            i += 2
+    else:
+        logger.warning("Itinerary text did not follow DAY N | format — using skeleton")
+
+    # Fallback if parsing produced no days
+    if not days:
+        for day_num in range(1, request.duration_days + 1):
+            current_date = start + timedelta(days=day_num - 1)
+            dest_idx = min((day_num - 1) // days_per_dest, len(destinations_cycle) - 1)
+            city = destinations_cycle[dest_idx]
+            days.append({
+                "day": day_num, "date": str(current_date),
+                "city": city, "theme": f"Day {day_num} — {city}",
+                "morning":   {"time": "8:00 AM",  "activity": f"Explore {city} forts and palaces", "duration_minutes": 120, "cost_inr": 300, "tip": "Go early to beat crowds"},
+                "afternoon": {"time": "1:00 PM", "activity": f"Local food trail in {city}",        "duration_minutes": 180, "cost_inr": 500, "tip": "Try the local thali"},
+                "evening":   {"time": "6:00 PM",  "activity": f"Sunset views and street shopping",  "duration_minutes": 120, "cost_inr": 400, "tip": "Golden hour is perfect for photos"},
+                "accommodation": f"{request.accommodation_preference.value.title()} hotel in {city}",
+                "daily_food_budget_inr": round(request.budget_inr * 0.20 / request.duration_days, 2),
+            })
 
     logger.info(f"Itinerary parsed — {len(days)} days")
     return days
