@@ -98,9 +98,11 @@ def parse_budget_breakdown(budget_text: str, total_budget: float) -> dict:
             "contingency_inr":   round(contingency, 2),
         }
 
-    # Force exact sum — adjust contingency to absorb rounding difference
-    current_sum = sum(extracted[c] for c in categories if c != "contingency_inr")
-    extracted["contingency_inr"] = round(total_budget - current_sum, 2)
+    max_contingency = round(total_budget * 0.15, 2)
+    if extracted.get("contingency_inr", 0) > max_contingency:
+        excess = round(extracted["contingency_inr"] - max_contingency, 2)
+        extracted["contingency_inr"] = max_contingency
+        extracted["shopping_buffer_inr"] = round(extracted.get("shopping_buffer_inr", 0) + excess, 2)
     extracted["total_inr"] = total_budget
 
     logger.info(f"Budget breakdown parsed — total: ₹{extracted['total_inr']:,.0f}")
@@ -206,7 +208,7 @@ def parse_itinerary(itinerary_text: str, request: TripRequest) -> list[dict]:
                             "time": time_label.replace("MORNING", "8:00 AM")
                                               .replace("AFTERNOON", "1:00 PM")
                                               .replace("EVENING", "6:00 PM"),
-                            "activity": m.group(1).strip(),
+                            "activity": re.sub(r'^[\d:]+\s*[APap][Mm]\)?\s*[):\s]*', '', m.group(1)).strip(),
                             "duration_minutes": int(m.group(2)),
                             "cost_inr": float(m.group(3).replace(",", "")),
                             "tip": m.group(4).strip(),
@@ -225,12 +227,23 @@ def parse_itinerary(itinerary_text: str, request: TripRequest) -> list[dict]:
                     "duration_minutes": 180, "cost_inr": 600,
                     "tip": "Try local street food for authentic flavours",
                 }
-                evening = extract_slot(block, "EVENING") or {
-                    "time": "6:00 PM",
-                    "activity": f"Evening walk and dinner in {city}",
-                    "duration_minutes": 120, "cost_inr": 500,
-                    "tip": "Golden hour is perfect for photography",
-                }
+                evening = extract_slot(block, "EVENING") or (
+                    {
+                        "time": "6:00 PM",
+                        "activity": f"Departure from {city} — head to airport/station",
+                        "duration_minutes": 60,
+                        "cost_inr": 0,
+                        "tip": "Reach 2 hours early. Check bags and confirm return ticket.",
+                    }
+                    if day_num == request.duration_days else
+                    {
+                        "time": "6:00 PM",
+                        "activity": f"Evening walk and dinner in {city}",
+                        "duration_minutes": 120,
+                        "cost_inr": 400,
+                        "tip": "Golden hour is perfect for photography",
+                    }
+                )
 
                 # Extract hotel name
                 stay_match = re.search(r'STAY:\s*([^\n]+)', block, re.IGNORECASE)
