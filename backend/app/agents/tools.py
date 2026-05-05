@@ -1,4 +1,5 @@
-from langchain.tools import tool
+from crewai.tools import BaseTool
+from pydantic import Field
 from app.rag.retriever import search_by_city_and_category
 from app.core.config import get_settings
 from loguru import logger
@@ -21,141 +22,142 @@ WEATHER_MOCK = {
 }
 
 CURRENCY_MOCK = {
-    "usd_rate": 0.012,   # 1 INR = 0.012 USD
-    "eur_rate": 0.011,   # 1 INR = 0.011 EUR
-    "gbp_rate": 0.0095,  # 1 INR = 0.0095 GBP
+    "usd_rate": 0.012,
+    "eur_rate": 0.011,
+    "gbp_rate": 0.0095,
 }
 
 
 # ─── Tool 1: WeatherTool ──────────────────────────────────────────────────────
 
-@tool
-def WeatherTool(city: str) -> str:
-    """
-    Get weather information for an Indian travel destination.
-    Returns temperature range, condition, rain risk, and packing tip.
-    Input: city name (e.g. 'Jaipur', 'Kerala', 'Manali')
-    """
-    city_key = city.lower().strip()
-
-    # Real API path (when WEATHER_API_KEY is set)
-    if settings.weather_api_key:
-        try:
-            import requests
-            url = (
-                f"http://api.openweathermap.org/data/2.5/weather"
-                f"?q={city},IN&appid={settings.weather_api_key}&units=metric"
-            )
-            response = requests.get(url, timeout=5)
-            data = response.json()
-
-            if response.status_code == 200:
-                temp = data["main"]["temp"]
-                condition = data["weather"][0]["description"].capitalize()
-                humidity = data["main"]["humidity"]
-                logger.info(f"WeatherTool: live data for {city}")
-                return (
-                    f"Weather in {city}: {temp}°C, {condition}. "
-                    f"Humidity: {humidity}%. "
-                    f"Best advice: carry water and dress for the conditions."
-                )
-        except Exception as e:
-            logger.warning(f"WeatherTool: live API failed for {city} — falling back to mock. Error: {e}")
-
-    # Mock fallback
-    data = WEATHER_MOCK.get(city_key)
-    if not data:
-        # Generic fallback for cities not in mock
-        logger.warning(f"WeatherTool: no mock data for '{city}' — using generic response")
-        return (
-            f"Weather in {city}: Typically 25-35°C during travel season. "
-            f"Rain risk: Moderate. Tip: Check local forecast before departure."
-        )
-
-    logger.info(f"WeatherTool: mock data for {city}")
-    return (
-        f"Weather in {city}: {data['temp']}, {data['condition']}. "
-        f"Rain risk: {data['rain_risk']}. "
-        f"Packing tip: {data['tip']}"
+class WeatherTool(BaseTool):
+    name: str = "WeatherTool"
+    description: str = (
+        "Get weather information for an Indian travel destination. "
+        "Returns temperature range, condition, rain risk, and packing tip. "
+        "Input: city name e.g. 'Jaipur', 'Kerala', 'Manali'"
     )
+
+    def _run(self, city: str) -> str:
+        city_key = city.lower().strip()
+
+        if settings.weather_api_key:
+            try:
+                import requests
+                url = (
+                    f"http://api.openweathermap.org/data/2.5/weather"
+                    f"?q={city},IN&appid={settings.weather_api_key}&units=metric"
+                )
+                response = requests.get(url, timeout=5)
+                data = response.json()
+                if response.status_code == 200:
+                    temp = data["main"]["temp"]
+                    condition = data["weather"][0]["description"].capitalize()
+                    humidity = data["main"]["humidity"]
+                    logger.info(f"WeatherTool: live data for {city}")
+                    return (
+                        f"Weather in {city}: {temp}°C, {condition}. "
+                        f"Humidity: {humidity}%."
+                    )
+            except Exception as e:
+                logger.warning(f"WeatherTool: live API failed for {city} — falling back to mock. Error: {e}")
+
+        data = WEATHER_MOCK.get(city_key)
+        if not data:
+            logger.warning(f"WeatherTool: no mock data for '{city}'")
+            return (
+                f"Weather in {city}: Typically 25-35°C during travel season. "
+                f"Rain risk: Moderate. Tip: Check local forecast before departure."
+            )
+
+        logger.info(f"WeatherTool: mock data for {city}")
+        return (
+            f"Weather in {city}: {data['temp']}, {data['condition']}. "
+            f"Rain risk: {data['rain_risk']}. "
+            f"Packing tip: {data['tip']}"
+        )
 
 
 # ─── Tool 2: CurrencyTool ─────────────────────────────────────────────────────
 
-@tool
-def CurrencyTool(amount_inr: float) -> str:
-    """
-    Convert an INR amount to USD, EUR, and GBP for international reference.
-    Input: amount in INR as a float (e.g. 80000.0)
-    """
-    # Real API path (when CURRENCY_API_KEY is set)
-    if settings.currency_api_key:
+class CurrencyTool(BaseTool):
+    name: str = "CurrencyTool"
+    description: str = (
+        "Convert an INR amount to USD, EUR, and GBP for international reference. "
+        "Input: amount in INR as a string e.g. '80000'"
+    )
+
+    def _run(self, amount_inr: str) -> str:
         try:
-            import requests
-            url = (
-                f"https://v6.exchangerate-api.com/v6/{settings.currency_api_key}"
-                f"/latest/INR"
-            )
-            response = requests.get(url, timeout=5)
-            data = response.json()
+            amount = float(str(amount_inr).replace(",", "").strip())
+        except ValueError:
+            return f"Invalid amount: {amount_inr}"
 
-            if response.status_code == 200:
-                rates = data["conversion_rates"]
-                usd = round(amount_inr * rates.get("USD", CURRENCY_MOCK["usd_rate"]), 2)
-                eur = round(amount_inr * rates.get("EUR", CURRENCY_MOCK["eur_rate"]), 2)
-                gbp = round(amount_inr * rates.get("GBP", CURRENCY_MOCK["gbp_rate"]), 2)
-                logger.info(f"CurrencyTool: live rates used")
-                return f"₹{amount_inr:,.0f} = ${usd} USD | €{eur} EUR | £{gbp} GBP (live rates)"
-        except Exception as e:
-            logger.warning(f"CurrencyTool: live API failed — falling back to mock. Error: {e}")
+        if settings.currency_api_key:
+            try:
+                import requests
+                url = (
+                    f"https://v6.exchangerate-api.com/v6/{settings.currency_api_key}"
+                    f"/latest/INR"
+                )
+                response = requests.get(url, timeout=5)
+                data = response.json()
+                if response.status_code == 200:
+                    rates = data["conversion_rates"]
+                    usd = round(amount * rates.get("USD", CURRENCY_MOCK["usd_rate"]), 2)
+                    eur = round(amount * rates.get("EUR", CURRENCY_MOCK["eur_rate"]), 2)
+                    gbp = round(amount * rates.get("GBP", CURRENCY_MOCK["gbp_rate"]), 2)
+                    logger.info(f"CurrencyTool: live rates used")
+                    return f"₹{amount:,.0f} = ${usd} USD | €{eur} EUR | £{gbp} GBP (live rates)"
+            except Exception as e:
+                logger.warning(f"CurrencyTool: live API failed — falling back to mock. Error: {e}")
 
-    # Mock fallback
-    usd = round(amount_inr * CURRENCY_MOCK["usd_rate"], 2)
-    eur = round(amount_inr * CURRENCY_MOCK["eur_rate"], 2)
-    gbp = round(amount_inr * CURRENCY_MOCK["gbp_rate"], 2)
-
-    logger.info(f"CurrencyTool: mock rates for ₹{amount_inr}")
-    return f"₹{amount_inr:,.0f} = ${usd} USD | €{eur} EUR | £{gbp} GBP (approximate rates)"
+        usd = round(amount * CURRENCY_MOCK["usd_rate"], 2)
+        eur = round(amount * CURRENCY_MOCK["eur_rate"], 2)
+        gbp = round(amount * CURRENCY_MOCK["gbp_rate"], 2)
+        logger.info(f"CurrencyTool: mock rates for ₹{amount}")
+        return f"₹{amount:,.0f} = ${usd} USD | €{eur} EUR | £{gbp} GBP (approximate rates)"
 
 
 # ─── Tool 3: AttractionTool ───────────────────────────────────────────────────
 
-@tool
-def AttractionTool(city_and_category: str) -> str:
-    """
-    Find top attractions and experiences for a city and category using travel reviews.
-    Input format: 'city|category' (e.g. 'Jaipur|heritage', 'Udaipur|food', 'Jodhpur|adventure')
-    Categories: heritage, food, adventure, shopping, nature, culture, nightlife
-    """
-    try:
-        parts = city_and_category.split("|")
-        if len(parts) != 2:
-            return f"Invalid input format. Use 'city|category' e.g. 'Jaipur|heritage'"
+class AttractionTool(BaseTool):
+    name: str = "AttractionTool"
+    description: str = (
+        "Find top attractions and experiences for a city and category using travel reviews. "
+        "Input format: 'city|category' e.g. 'Jaipur|heritage', 'Udaipur|food', 'Jodhpur|adventure'. "
+        "Categories: heritage, food, adventure, shopping, nature, culture, nightlife"
+    )
 
-        city = parts[0].strip()
-        category = parts[1].strip()
+    def _run(self, city_and_category: str) -> str:
+        try:
+            parts = city_and_category.split("|")
+            if len(parts) != 2:
+                return "Invalid input format. Use 'city|category' e.g. 'Jaipur|heritage'"
 
-        logger.info(f"AttractionTool: searching {city} | {category}")
-        results = search_by_city_and_category(city=city, category=category, top_k=5)
+            city = parts[0].strip()
+            category = parts[1].strip()
 
-        if not results:
-            logger.warning(f"AttractionTool: no results for {city}|{category}")
-            return (
-                f"No specific reviews found for {category} in {city}. "
-                f"Recommend researching: top {category} spots in {city} India."
-            )
+            logger.info(f"AttractionTool: searching {city} | {category}")
+            results = search_by_city_and_category(city=city, category=category, top_k=5)
 
-        # Format results into readable text for the agent
-        output_lines = [f"Top {category} experiences in {city} (from traveler reviews):"]
-        for i, result in enumerate(results, 1):
-            output_lines.append(
-                f"{i}. {result['destination']} — Category: {result['category']} "
-                f"| Rating: {result['rating']}/5 | {result['combined_text'][:200]}"
-            )
+            if not results:
+                logger.warning(f"AttractionTool: no results for {city}|{category}")
+                return (
+                    f"No specific reviews found for {category} in {city}. "
+                    f"Recommend researching: top {category} spots in {city} India."
+                )
 
-        logger.info(f"AttractionTool: returned {len(results)} results for {city}|{category}")
-        return "\n".join(output_lines)
+            output_lines = [f"Top {category} experiences in {city} (from traveler reviews):"]
+            for i, result in enumerate(results, 1):
+                output_lines.append(
+                    f"{i}. {result['destination']} — Category: {result['category']} "
+                    f"| Rating: {result['rating']}/4 | {result['combined_text'][:200]}"
+                )
 
-    except Exception as e:
-        logger.error(f"AttractionTool error: {e}")
-        return f"Error retrieving attractions for {city_and_category}: {str(e)}"
+            logger.info(f"AttractionTool: returned {len(results)} results for {city}|{category}")
+            return "\n".join(output_lines)
+
+        except Exception as e:
+            logger.error(f"AttractionTool error: {e}")
+            return f"Error retrieving attractions for {city_and_category}: {str(e)}"
