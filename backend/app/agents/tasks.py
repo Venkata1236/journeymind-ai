@@ -1,176 +1,199 @@
 from crewai import Task
-from app.agents.agents import (
-    get_destination_researcher,
-    get_itinerary_planner,
-    get_budget_analyst,
-    get_local_expert,
-)
+from pydantic import BaseModel
 from loguru import logger
 
 
-def create_tasks(
-    origin: str,
-    destinations: list[str],
-    duration_days: int,
-    budget_inr: float,
-    group_size: int,
-    travel_style: str,
-    interests: list[str],
-    accommodation_preference: str,
-    trip_start_date: str,
-):
-    """
-    Create all 4 tasks with proper context passing.
-    Each task receives the previous task's output via context=[].
-    This is the sequential crew's backbone.
-    """
-    destinations_str = ", ".join(destinations)
+# ─── Output Schemas for Structured JSON ──────────────────────────────────────
+
+class ResearchOutput(BaseModel):
+    destinations: dict  # {city: {attractions, hidden_gems, transport, weather}}
+
+class ItineraryOutput(BaseModel):
+    days: list  # list of day objects
+
+class BudgetOutput(BaseModel):
+    accommodation_inr: float
+    food_inr: float
+    transport_inr: float
+    activities_inr: float
+    shopping_buffer_inr: float
+    contingency_inr: float
+    total_inr: float
+    feasibility: str
+    notes: str
+
+class LocalOutput(BaseModel):
+    food_spots: list
+    cultural_etiquette: list
+    common_mistakes: list
+    packing_list: list
+    safety_tips: list
+
+
+def get_destination_research_task(agent, destinations, travel_style, interests):
+    logger.info("Creating destination research task")
+    dest_str = ", ".join(destinations)
     interests_str = ", ".join(interests)
 
-    researcher = get_destination_researcher()
-    planner = get_itinerary_planner()
-    analyst = get_budget_analyst()
-    expert = get_local_expert()
+    return Task(
+        description=f"""
+Research each destination in this list: {dest_str}
 
-    logger.info(f"Creating tasks for {destinations_str} | {duration_days} days | ₹{budget_inr}")
+Travel style: {travel_style}
+Traveler interests: {interests_str}
 
-    # ─── Task 1: Destination Research ────────────────────────────────────────
-    task_research = Task(
-        description=(
-            f"Research each destination for a {duration_days}-day trip from {origin} "
-            f"to {destinations_str}.\n\n"
-            f"Traveler profile:\n"
-            f"- Travel style: {travel_style}\n"
-            f"- Interests: {interests_str}\n"
-            f"- Group size: {group_size} people\n"
-            f"- Accommodation preference: {accommodation_preference}\n\n"
-            f"For EACH destination in [{destinations_str}], use AttractionTool to research:\n"
-            f"1. Top 5 must-visit attractions (use interests to prioritize)\n"
-            f"2. Top 3 hidden gems not on standard tourist itineraries\n"
-            f"3. Best neighbourhoods to stay in\n"
-            f"4. Local transport options within the city\n"
-            f"5. Inter-city travel options and travel time to the next destination\n\n"
-            f"Use WeatherTool to get weather for each destination.\n"
-            f"Format your output clearly per destination with numbered lists."
-        ),
-        expected_output=(
-            f"A detailed research report for each of [{destinations_str}] containing: "
-            f"top attractions, hidden gems, best neighbourhoods, local transport, "
-            f"inter-city travel options, and weather summary. "
-            f"Clearly labeled per destination."
-        ),
-        agent=researcher,
+For EACH destination, use AttractionTool with format "city|category" to find attractions.
+Use WeatherTool for each city to get actual weather data.
+
+For every destination provide:
+1. Top 3 specific named attractions (real places, not generic descriptions)
+2. 2 hidden gems (off the beaten path, authentic experiences)
+3. Best neighbourhoods to stay in
+4. Local transport options (auto, cab, bike rental, costs)
+5. Inter-city travel from previous destination (train/bus/flight, duration, approx cost)
+6. Weather summary from WeatherTool
+
+Be specific. "Hawa Mahal" not "a famous palace". "Sardar Market" not "a local market".
+""",
+        expected_output=f"""
+A detailed research report for each destination in {dest_str}.
+For each city: named attractions, hidden gems, transport options, weather data, and inter-city travel info.
+Format as clear sections per city with specific names and costs.
+""",
+        agent=agent,
     )
 
-    # ─── Task 2: Itinerary Planning ───────────────────────────────────────────
-    # context=[task_research] passes Task 1's output to this task
-    task_itinerary = Task(
-        description=(
-            f"Using the destination research provided, create a detailed day-by-day "
-            f"itinerary for {duration_days} days starting {trip_start_date}.\n\n"
-            f"Trip details:\n"
-            f"- Origin: {origin}\n"
-            f"- Destinations: {destinations_str}\n"
-            f"- Travel style: {travel_style}\n"
-            f"- Interests: {interests_str}\n"
-            f"- Accommodation preference: {accommodation_preference}\n\n"
-            f"Rules you MUST follow:\n"
-            f"1. Maximum 4 activities per day — quality over quantity\n"
-            f"2. Day 1 must be light — arrival, check-in, one nearby attraction, dinner\n"
-            f"3. Last day must be light — breakfast, one activity, travel to airport/station\n"
-            f"4. Always include morning (8-12pm), afternoon (12-5pm), evening (5-9pm) blocks\n"
-            f"5. Include meal recommendations at each time block\n"
-            f"6. Account for travel time between attractions\n"
-            f"7. Include accommodation name per day (matching {accommodation_preference} preference)\n"
-            f"8. Include estimated cost in INR per activity\n\n"
-            f"Use AttractionTool to validate specific activity recommendations."
-        ),
-        expected_output=(
-            f"A complete {duration_days}-day itinerary with morning, afternoon, and evening "
-            f"blocks for each day. Each block must include: time, activity name, duration, "
-            f"estimated cost in INR, and one insider tip. Each day must include accommodation "
-            f"name and daily food budget estimate."
-        ),
-        agent=planner,
-        context=[task_research],  # ← Task 1 output flows into Task 2
+
+def get_itinerary_task(agent, destinations, duration_days, travel_style, trip_start_date, context_tasks):
+    logger.info("Creating itinerary planning task")
+    dest_str = ", ".join(destinations)
+
+    return Task(
+        description=f"""
+Using the destination research provided, create a day-by-day itinerary.
+
+Trip: {dest_str} | {duration_days} days | Style: {travel_style} | Start: {trip_start_date}
+
+STRICT RULES:
+- Maximum 4 activities per day (morning, afternoon, evening, optional night)
+- Each activity must be a SPECIFIC named place from the research (not generic)
+- Include realistic travel time between attractions
+- Day 1: Light schedule — arrival, check-in, one nearby attraction, dinner
+- Last day: Half-day only — morning activity, checkout, departure
+- Include meal recommendations at each time block (specific restaurant/dhaba name)
+- Distribute days across destinations: {dest_str}
+
+For EACH day output this exact structure:
+DAY [N] | [DATE] | [CITY] | [THEME]
+MORNING (8:00 AM): [specific activity name] | [duration mins] | ₹[cost] | Tip: [insider tip]
+AFTERNOON (1:00 PM): [specific activity name] | [duration mins] | ₹[cost] | Tip: [insider tip]
+EVENING (6:00 PM): [specific activity name] | [duration mins] | ₹[cost] | Tip: [insider tip]
+STAY: [specific hotel name matching {travel_style} style]
+FOOD BUDGET: ₹[amount]
+""",
+        expected_output=f"""
+A complete {duration_days}-day itinerary with specific named activities, timings, costs, and accommodation for each day.
+Each day clearly labeled with DAY N | DATE | CITY | THEME format.
+Maximum 4 activities per day. Realistic timing and costs.
+""",
+        agent=agent,
+        context=context_tasks,
     )
 
-    # ─── Task 3: Budget Analysis ──────────────────────────────────────────────
-    # context=[task_research, task_itinerary] passes both Task 1 and Task 2 outputs
-    task_budget = Task(
-        description=(
-            f"Using the itinerary provided, create a realistic budget breakdown for "
-            f"the full trip.\n\n"
-            f"Budget constraints:\n"
-            f"- Total budget: ₹{budget_inr:,.0f}\n"
-            f"- Group size: {group_size} people\n"
-            f"- Duration: {duration_days} days\n"
-            f"- Travel style: {travel_style}\n"
-            f"- Accommodation preference: {accommodation_preference}\n\n"
-            f"Rules you MUST follow:\n"
-            f"1. Break down budget into EXACTLY these 6 categories:\n"
-            f"   - accommodation_inr\n"
-            f"   - food_inr\n"
-            f"   - transport_inr\n"
-            f"   - activities_inr\n"
-            f"   - shopping_buffer_inr\n"
-            f"   - contingency_inr (MUST be exactly 10% of subtotal)\n"
-            f"2. All 6 categories MUST sum to exactly ₹{budget_inr:,.0f}\n"
-            f"3. Use CurrencyTool to convert ₹{budget_inr:,.0f} to USD/EUR for reference\n"
-            f"4. Provide budget feasibility rating:\n"
-            f"   - FEASIBLE: budget is comfortable for the requested style\n"
-            f"   - TIGHT: doable but requires discipline and trade-offs\n"
-            f"   - OVER_BUDGET: budget is unrealistic — state exactly why and suggest minimum needed\n"
-            f"5. If OVER_BUDGET, do NOT silently adjust — explicitly state the shortfall amount\n"
-            f"6. Include per-person cost (total / {group_size})\n"
-            f"7. Include best_season recommendation for {destinations_str}"
-        ),
-        expected_output=(
-            f"A budget breakdown with exactly 6 categories summing to ₹{budget_inr:,.0f}. "
-            f"Must include: feasibility rating (FEASIBLE/TIGHT/OVER_BUDGET), "
-            f"per-person cost, currency conversion, and best season. "
-            f"If OVER_BUDGET, include specific shortfall amount and adjustments needed."
-        ),
-        agent=analyst,
-        context=[task_research, task_itinerary],  # ← Task 1 + Task 2 outputs flow into Task 3
+
+def get_budget_task(agent, budget_inr, group_size, duration_days, travel_style, context_tasks):
+    logger.info("Creating budget analysis task")
+
+    return Task(
+        description=f"""
+Based on the itinerary provided, create a detailed budget breakdown.
+
+Total budget: ₹{budget_inr:,.0f}
+Group size: {group_size} people
+Duration: {duration_days} days
+Style: {travel_style}
+
+Use CurrencyTool with "{budget_inr}" to show international equivalent.
+
+RULES:
+- Categories: accommodation, food, transport, activities, shopping_buffer, contingency
+- Contingency = exactly 10% of total budget
+- All categories MUST sum to exactly ₹{budget_inr:,.0f} — no exceptions
+- Per person per day = ₹{budget_inr / (group_size * duration_days):,.0f}
+
+FEASIBILITY CHECK:
+- Heritage style minimum: ₹2,500/person/day
+- If per_person_per_day >= ₹3,250 → FEASIBLE
+- If per_person_per_day >= ₹2,500 → TIGHT
+- If per_person_per_day < ₹2,500 → OVER_BUDGET
+
+Output this exact format:
+BUDGET BREAKDOWN:
+accommodation_inr: [amount]
+food_inr: [amount]
+transport_inr: [amount]
+activities_inr: [amount]
+shopping_buffer_inr: [amount]
+contingency_inr: [amount]
+total_inr: {budget_inr}
+FEASIBILITY: [FEASIBLE/TIGHT/OVER_BUDGET]
+NOTES: [1-2 sentences on budget adequacy and key cost drivers]
+INTERNATIONAL: [CurrencyTool output]
+""",
+        expected_output=f"""
+A complete budget breakdown with all 6 categories summing exactly to ₹{budget_inr:,.0f}.
+Feasibility verdict and brief notes on budget adequacy.
+""",
+        agent=agent,
+        context=context_tasks,
     )
 
-    # ─── Task 4: Local Expert Tips ────────────────────────────────────────────
-    # context=[task_research, task_itinerary, task_budget] — receives ALL previous outputs
-    task_local = Task(
-        description=(
-            f"Using all the research, itinerary, and budget information provided, "
-            f"add the essential human layer to this trip plan.\n\n"
-            f"Trip context:\n"
-            f"- Destinations: {destinations_str}\n"
-            f"- Travel style: {travel_style}\n"
-            f"- Interests: {interests_str}\n"
-            f"- First-time visitors to these destinations\n\n"
-            f"Provide ALL of the following — be specific, not generic:\n\n"
-            f"1. FOOD SPOTS (5 per destination):\n"
-            f"   - Specific restaurant/stall name + what to order\n"
-            f"   - Use AttractionTool with 'food' category to ground recommendations\n\n"
-            f"2. CULTURAL ETIQUETTE (5 tips):\n"
-            f"   - Specific dos and don'ts for {destinations_str}\n"
-            f"   - Dress codes at religious sites\n\n"
-            f"3. COMMON MISTAKES TO AVOID (5 tips):\n"
-            f"   - Tourist traps specific to {destinations_str}\n"
-            f"   - Scams to watch for\n\n"
-            f"4. PACKING LIST (10 items):\n"
-            f"   - Based on WeatherTool data for {destinations_str}\n"
-            f"   - Specific to {travel_style} travel style\n\n"
-            f"5. SAFETY TIPS (5 tips):\n"
-            f"   - Destination-specific safety advice\n"
-            f"   - Emergency contacts format"
-        ),
-        expected_output=(
-            f"Five sections: food_spots (5 per destination), cultural_etiquette (5 tips), "
-            f"common_mistakes (5 tips), packing_list (10 items), safety_tips (5 tips). "
-            f"Every tip must be specific to {destinations_str} — no generic travel advice."
-        ),
-        agent=expert,
-        context=[task_research, task_itinerary, task_budget],  # ← All 3 previous outputs
-    )
 
-    logger.info("All 4 tasks created with context passing configured")
-    return task_research, task_itinerary, task_budget, task_local
+def get_local_expert_task(agent, destinations, interests, context_tasks):
+    logger.info("Creating local expert task")
+    dest_str = ", ".join(destinations)
+    interests_str = ", ".join(interests)
+
+    return Task(
+        description=f"""
+Using all research and itinerary provided, add the authentic local layer.
+
+Destinations: {dest_str}
+Traveler interests: {interests_str}
+
+Use AttractionTool for "city|food" queries to find authentic food spots.
+Use WeatherTool for each city to add weather-specific packing advice.
+
+Provide SPECIFIC recommendations — not generic advice.
+"Laxmi Mishtan Bhandar on Johari Bazaar for dal baati churma" not "try local food".
+
+Output these exact sections:
+
+FOOD SPOTS:
+1. [Specific restaurant/stall name] — [city] — [what to order] — ₹[cost]
+2. [repeat for 5 spots minimum]
+
+CULTURAL ETIQUETTE:
+1. [Specific actionable tip]
+[5 tips minimum]
+
+AVOID THESE:
+1. [Specific tourist trap or mistake to avoid]
+[5 mistakes minimum]
+
+PACKING LIST:
+1. [Item specific to this trip's weather and activities]
+[10 items minimum]
+
+SAFETY TIPS:
+1. [Specific safety tip for these destinations]
+[5 tips minimum]
+""",
+        expected_output=f"""
+Authentic, specific local tips for {dest_str} covering food spots (with names and costs),
+cultural etiquette, tourist mistakes to avoid, packing list, and safety tips.
+All recommendations must be specific — no generic travel advice.
+""",
+        agent=agent,
+        context=context_tasks,
+    )
