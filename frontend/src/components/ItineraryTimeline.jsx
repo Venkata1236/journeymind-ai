@@ -1,3 +1,5 @@
+import { useState } from 'react'
+
 const TIME_ICONS = {
   morning:   '🌅',
   afternoon: '☀️',
@@ -8,6 +10,10 @@ const FEASIBILITY_CONFIG = {
   FEASIBLE:    { label: 'Budget Feasible',   color: 'text-green-400',  bg: 'bg-green-900/30',  border: 'border-green-700' },
   TIGHT:       { label: 'Budget Tight',      color: 'text-yellow-400', bg: 'bg-yellow-900/30', border: 'border-yellow-700' },
   OVER_BUDGET: { label: 'Over Budget',       color: 'text-red-400',    bg: 'bg-red-900/30',    border: 'border-red-700' },
+}
+
+function cleanText(text) {
+  return text?.replace(/\*\*(.*?)\*\*/g, '$1').trim() || ''
 }
 
 function SlotCard({ slot, period }) {
@@ -28,7 +34,7 @@ function SlotCard({ slot, period }) {
         <div className="bg-surface-800 rounded-xl p-4 border border-surface-600 hover:border-surface-500 transition">
           <div className="flex items-start justify-between gap-3 mb-2">
             <p className="text-white text-sm font-medium leading-snug">
-              {slot.activity}
+              {cleanText(slot.activity)}
             </p>
             {slot.cost_inr > 0 && (
               <span className="text-primary-400 text-xs font-bold flex-shrink-0 bg-primary-900/30 px-2 py-1 rounded-lg">
@@ -91,7 +97,7 @@ function DayCard({ day, isActive, onClick }) {
           {/* Footer */}
           <div className="flex items-center justify-between pt-3 border-t border-surface-600 mt-3">
             <div className="text-xs text-slate-500">
-              🏨 {day.accommodation}
+              🏨 {cleanText(day.accommodation)}
             </div>
             <div className="text-xs text-primary-400 font-medium">
               🍽 Food budget: ₹{day.daily_food_budget_inr?.toLocaleString('en-IN')}
@@ -175,7 +181,3 @@ export default function ItineraryTimeline({ itinerary, tripSummary }) {
     </div>
   )
 }
-
-
-// Add missing import at top
-import { useState } from 'react'
