@@ -1,25 +1,24 @@
 import axios from 'axios'
 
-const BASE_URL = import.meta.env.VITE_API_URL || ''
+const BASE_URL =
+  import.meta.env.VITE_API_URL || 'http://localhost:8000'
 
 const api = axios.create({
   baseURL: BASE_URL,
-  timeout: 120000, // 2 minutes — crew takes time
+  timeout: 120000,
   headers: {
     'Content-Type': 'application/json',
   },
 })
 
-// ─── Request Interceptor ──────────────────────────────────────────────────────
 api.interceptors.request.use(
   (config) => {
-    console.log(`[API] ${config.method?.toUpperCase()} ${config.url}`)
+    console.log(`[API] ${config.method?.toUpperCase()} ${config.baseURL}${config.url}`)
     return config
   },
   (error) => Promise.reject(error)
 )
 
-// ─── Response Interceptor ─────────────────────────────────────────────────────
 api.interceptors.response.use(
   (response) => response,
   (error) => {
@@ -32,37 +31,30 @@ api.interceptors.response.use(
   }
 )
 
-
-// ─── Trip Planning ────────────────────────────────────────────────────────────
-
 export const planTrip = async (tripRequest) => {
-  const response = await api.post('/api/plan-trip', tripRequest)
+  const response = await api.post('/plan-trip', tripRequest)
   return response.data
 }
 
-
-// ─── History ──────────────────────────────────────────────────────────────────
-
 export const getHistory = async (limit = 20, offset = 0) => {
-  const response = await api.get('/api/history', {
+  const response = await api.get('/history', {
     params: { limit, offset },
   })
   return response.data
 }
 
 export const getTripById = async (tripId) => {
-  const response = await api.get(`/api/history/${tripId}`)
+  const response = await api.get(`/history/${tripId}`)
   return response.data
 }
 
 export const deleteTrip = async (tripId) => {
-  await api.delete(`/api/history/${tripId}`)
+  await api.delete(`/history/${tripId}`)
 }
-
-
-// ─── Health ───────────────────────────────────────────────────────────────────
 
 export const checkHealth = async () => {
   const response = await api.get('/health')
   return response.data
 }
+
+export default api
