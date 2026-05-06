@@ -6,7 +6,7 @@ services:
     container_name: journeymind-db
     environment:
       POSTGRES_USER: postgres
-      POSTGRES_PASSWORD: password
+      POSTGRES_PASSWORD: Venkat1236
       POSTGRES_DB: journeymind
     ports:
       - "5432:5432"
