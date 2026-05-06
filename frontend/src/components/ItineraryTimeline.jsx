@@ -176,5 +176,6 @@ export default function ItineraryTimeline({ itinerary, tripSummary }) {
   )
 }
 
+
 // Add missing import at top
 import { useState } from 'react'
